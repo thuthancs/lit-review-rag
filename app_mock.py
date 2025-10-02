@@ -1,19 +1,20 @@
 """
-Streamlit app for Literature Review RAG Assistant
-Run with: streamlit run app.py
+Streamlit app for Literature Review RAG Assistant (Mock Version)
+Uses mock vectorization to bypass OpenAI quota issues.
+Run with: streamlit run app_mock.py
 """
 
 import streamlit as st
-from weaviate_setup import (
-    weaviate_manager,
-    setup_weaviate,
-    get_weaviate_collection,
+from weaviate_setup_mock import (
+    mock_weaviate_manager,
+    setup_mock_weaviate,
+    get_mock_weaviate_collection,
 )
 from pdf_processor import PDFProcessor
-from rag_queries import (
-    get_rag_manager,
-    generate_gap_analysis,
-    chat_with_papers,
+from rag_queries_mock import (
+    get_mock_rag_manager,
+    generate_gap_analysis_mock,
+    chat_with_papers_mock,
 )
 import tempfile
 import os
@@ -23,7 +24,7 @@ from pathlib import Path
 
 # Page config
 st.set_page_config(
-    page_title="Literature Review Assistant",
+    page_title="Literature Review Assistant (Mock Mode)",
     page_icon="📚",
     layout="wide",
     initial_sidebar_state="expanded",
@@ -36,13 +37,21 @@ st.markdown(
     .main-header {
         font-size: 2.5rem;
         font-weight: bold;
-        color: #1f77b4;
+        color: #ff6b35;
         margin-bottom: 0.5rem;
     }
     .sub-header {
         font-size: 1rem;
         color: #666;
         margin-bottom: 2rem;
+    }
+    .mock-warning {
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background-color: #fff3cd;
+        border: 1px solid #ffeaa7;
+        margin: 1rem 0;
+        color: #856404;
     }
     .success-box {
         padding: 1rem;
@@ -69,7 +78,7 @@ st.markdown(
         padding: 1rem;
         border-radius: 0.5rem;
         background-color: #f8f9fa;
-        border-left: 4px solid #1f77b4;
+        border-left: 4px solid #ff6b35;
         margin: 0.5rem 0;
     }
     .chat-message {
@@ -122,18 +131,18 @@ def init_session_state():
 
 
 def connect_to_weaviate():
-    """Establish connection to Weaviate"""
+    """Establish connection to Weaviate (mock mode)"""
     try:
         if not st.session_state.connected:
-            with st.spinner("Connecting to Weaviate..."):
-                if setup_weaviate():
-                    st.session_state.client = weaviate_manager.client
+            with st.spinner("Connecting to Weaviate (Mock Mode)..."):
+                if setup_mock_weaviate():
+                    st.session_state.client = mock_weaviate_manager.client
                     st.session_state.connected = True
                     st.session_state.connection_error = None
                     st.session_state.collection_initialized = True
                     return True
                 else:
-                    st.session_state.connection_error = "Failed to setup Weaviate"
+                    st.session_state.connection_error = "Failed to setup mock Weaviate"
                     st.session_state.connected = False
                     return False
     except Exception as e:
@@ -146,7 +155,8 @@ def display_connection_status():
     """Display connection status in sidebar"""
     st.sidebar.markdown("### 🔌 Connection Status")
     if st.session_state.connected:
-        st.sidebar.success("✓ Connected to Weaviate")
+        st.sidebar.success("✓ Connected to Weaviate (Mock Mode)")
+        st.sidebar.info("🔄 Using mock vectors (no OpenAI)")
     else:
         st.sidebar.error("✗ Not connected")
         if st.session_state.connection_error:
@@ -196,7 +206,7 @@ def upload_papers_section():
 
 
 def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual_year):
-    """Process and upload papers to Weaviate"""
+    """Process and upload papers to Weaviate (mock mode)"""
     progress_bar = st.sidebar.progress(0)
     status_text = st.sidebar.empty()
 
@@ -208,7 +218,7 @@ def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual
     
     # Add timeout warning for large files
     if len(uploaded_files) > 3:
-        st.sidebar.warning("⚠️ Large upload detected. This may take several minutes due to vectorization.")
+        st.sidebar.warning("⚠️ Large upload detected. This may take several minutes due to mock vectorization.")
 
     for idx, uploaded_file in enumerate(uploaded_files):
         try:
@@ -237,8 +247,8 @@ def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual
             else:
                 raise ValueError(f"Failed to process {uploaded_file.name}")
 
-            # Import to Weaviate
-            rag_manager = get_rag_manager()
+            # Import to Weaviate using mock system
+            rag_manager = get_mock_rag_manager()
             paper_data = [{
                 'title': result['title'] if result else uploaded_file.name.replace('.pdf', ''),
                 'authors': result['authors'] if result else ['Unknown'],
@@ -248,18 +258,15 @@ def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual
                 'chunks': [chunk['chunk'] for chunk in chunks]
             }]
             
-            # Try to insert papers with better error handling
-            status_text.text(f"Uploading {uploaded_file.name} to Weaviate...")
+            # Try to insert papers with mock vectors
+            status_text.text(f"Uploading {uploaded_file.name} to Weaviate (Mock Mode)...")
             try:
                 success = rag_manager.insert_papers(paper_data)
                 if not success:
                     raise ValueError("Failed to insert papers into Weaviate")
             except Exception as insert_error:
                 error_msg = str(insert_error)
-                if "quota" in error_msg.lower() or "429" in error_msg:
-                    raise ValueError("OpenAI API quota exceeded. Cannot upload papers without vectorization. Please check your OpenAI billing.")
-                else:
-                    raise ValueError(f"Failed to upload paper: {error_msg}")
+                raise ValueError(f"Failed to upload paper: {error_msg}")
 
             # Track success
             total_chunks += len(chunks)
@@ -290,6 +297,7 @@ def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual
             f"✅ Successfully uploaded {successful}/{len(uploaded_files)} papers!"
         )
         st.sidebar.info(f"📊 Total chunks created: {total_chunks}")
+        st.sidebar.info("🔄 Used mock vectors (no OpenAI required)")
 
     if failed:
         with st.sidebar.expander(f"⚠️ {len(failed)} file(s) failed"):
@@ -307,22 +315,19 @@ def display_collection_stats():
         return
 
     try:
-        # Get collection stats (simplified for now)
-        collection = get_weaviate_collection()
+        # Get collection stats
+        collection = get_mock_weaviate_collection()
         if collection:
-            # Get total count
             result = collection.aggregate.over_all(total_count=True)
             total_chunks = result.total_count if result.total_count else 0
             stats = {"total_chunks": total_chunks}
-            
-            # For now, just show basic stats
             papers = []  # TODO: Implement paper summary
         else:
             stats = {"total_chunks": 0}
             papers = []
 
         st.sidebar.markdown("---")
-        st.sidebar.markdown("### 📊 Collection Stats")
+        st.sidebar.markdown("### 📊 Collection Stats (Mock Mode)")
 
         col1, col2 = st.sidebar.columns(2)
         with col1:
@@ -349,41 +354,21 @@ def display_collection_stats():
         st.sidebar.error(f"Error loading stats: {e}")
 
 
-def settings_section():
-    """Display settings in sidebar"""
-    st.sidebar.markdown("---")
-    st.sidebar.markdown("### ⚙️ Settings")
-
-    with st.sidebar.expander("Chunking Settings"):
-        st.session_state.chunk_size = st.slider(
-            "Chunk Size (words)",
-            100,
-            400,
-            st.session_state.chunk_size,
-            help="Number of words per chunk",
-        )
-        st.session_state.overlap_size = st.slider(
-            "Overlap Size (words)",
-            0,
-            100,
-            st.session_state.overlap_size,
-            help="Word overlap between chunks",
-        )
-
-    with st.sidebar.expander("Search Settings"):
-        st.session_state.search_limit = st.slider(
-            "Search Results",
-            3,
-            20,
-            st.session_state.search_limit,
-            help="Number of chunks to retrieve",
-        )
-
-
 def gap_analysis_tab():
     """Gap Analysis tab content"""
-    st.markdown("### 🔍 Research Gap Analysis")
-    st.markdown("*Identify unexplored areas and opportunities in your literature*")
+    st.markdown("### 🔍 Research Gap Analysis (Mock Mode)")
+    st.markdown("*Basic text-based analysis without OpenAI*")
+    
+    # Show mock mode warning
+    st.markdown(
+        """
+        <div class="mock-warning">
+            <strong>⚠️ Mock Mode:</strong> This analysis uses simple text matching and keyword extraction. 
+            For sophisticated AI-powered analysis, OpenAI API access is required.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     if not st.session_state.connected:
         st.warning("⚠️ Please connect to Weaviate first!")
@@ -391,7 +376,7 @@ def gap_analysis_tab():
 
     # Check if papers exist
     try:
-        collection = get_weaviate_collection()
+        collection = get_mock_weaviate_collection()
         if collection:
             result = collection.aggregate.over_all(total_count=True)
             total_chunks = result.total_count if result.total_count else 0
@@ -429,18 +414,13 @@ def gap_analysis_tab():
 
     # Analysis button
     if st.button("🔍 Analyze Research Gaps", type="primary", use_container_width=True):
-        with st.spinner("🤔 Analyzing papers for research gaps..."):
+        with st.spinner("🤔 Analyzing papers for research gaps (Mock Mode)..."):
             try:
-                result = generate_gap_analysis(focus_area if focus_area else "research")
+                result = generate_gap_analysis_mock(focus_area if focus_area else "research")
                 if result["success"]:
                     gaps = result["analysis"]
                 else:
-                    error_msg = result.get('error', 'Unknown error')
-                    if "quota" in error_msg.lower() or "429" in error_msg:
-                        st.error("❌ OpenAI API quota exceeded. Please check your OpenAI billing and usage limits.")
-                        st.info("💡 You can still upload papers and view collection stats, but gap analysis requires OpenAI API access.")
-                    else:
-                        st.error(f"❌ Error during analysis: {error_msg}")
+                    st.error(f"❌ Error during analysis: {result.get('error', 'Unknown error')}")
                     return
 
                 st.session_state.last_gap_analysis = {
@@ -456,7 +436,7 @@ def gap_analysis_tab():
     # Display results
     if st.session_state.last_gap_analysis:
         st.markdown("---")
-        st.success("✅ Analysis Complete!")
+        st.success("✅ Analysis Complete! (Mock Mode)")
 
         # Metadata
         analysis = st.session_state.last_gap_analysis
@@ -477,7 +457,7 @@ def gap_analysis_tab():
             st.download_button(
                 label="📥 Download as TXT",
                 data=analysis["gaps"],
-                file_name=f"research_gaps_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+                file_name=f"research_gaps_mock_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
                 mime="text/plain",
                 use_container_width=True,
             )
@@ -489,8 +469,19 @@ def gap_analysis_tab():
 
 def chat_tab():
     """Chat with Papers tab content"""
-    st.markdown("### 💬 Chat with Your Papers")
-    st.markdown("*Ask questions and get answers grounded in your research papers*")
+    st.markdown("### 💬 Chat with Your Papers (Mock Mode)")
+    st.markdown("*Basic text-matching responses without OpenAI*")
+    
+    # Show mock mode warning
+    st.markdown(
+        """
+        <div class="mock-warning">
+            <strong>⚠️ Mock Mode:</strong> This chat uses simple text matching and keyword extraction. 
+            For sophisticated AI-powered responses, OpenAI API access is required.
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     if not st.session_state.connected:
         st.warning("⚠️ Please connect to Weaviate first!")
@@ -498,7 +489,7 @@ def chat_tab():
 
     # Check if papers exist
     try:
-        collection = get_weaviate_collection()
+        collection = get_mock_weaviate_collection()
         if collection:
             result = collection.aggregate.over_all(total_count=True)
             total_chunks = result.total_count if result.total_count else 0
@@ -530,7 +521,7 @@ def chat_tab():
                 st.markdown(
                     f"""
                 <div class="chat-message assistant-message">
-                    <strong>Assistant:</strong><br/>
+                    <strong>Assistant (Mock Mode):</strong><br/>
                     {msg['content']}
                 </div>
                 """,
@@ -581,18 +572,13 @@ def chat_tab():
         )
 
         # Get answer
-        with st.spinner("🔍 Searching papers and generating answer..."):
+        with st.spinner("🔍 Searching papers and generating answer (Mock Mode)..."):
             try:
-                result = chat_with_papers(question)
+                result = chat_with_papers_mock(question)
                 if result["success"]:
                     answer = result["answer"]
                 else:
-                    error_msg = result.get('error', 'Unknown error')
-                    if "quota" in error_msg.lower() or "429" in error_msg:
-                        st.error("❌ OpenAI API quota exceeded. Please check your OpenAI billing and usage limits.")
-                        st.info("💡 You can still upload papers and view collection stats, but chat and gap analysis require OpenAI API access.")
-                    else:
-                        st.error(f"❌ Error getting answer: {error_msg}")
+                    st.error(f"❌ Error getting answer: {result.get('error', 'Unknown error')}")
                     # Remove user message if failed
                     st.session_state.chat_history.pop()
                     return
@@ -621,22 +607,33 @@ def main():
 
     # Header
     st.markdown(
-        '<p class="main-header">📚 Literature Review Assistant</p>',
+        '<p class="main-header">📚 Literature Review Assistant (Mock Mode)</p>',
         unsafe_allow_html=True,
     )
     st.markdown(
-        '<p class="sub-header">AI-powered research gap analysis and paper Q&A using Weaviate RAG</p>',
+        '<p class="sub-header">Basic RAG system using mock vectors (bypasses OpenAI quota issues)</p>',
         unsafe_allow_html=True,
+    )
+    
+    # Mock mode notice
+    st.markdown(
+        """
+        <div class="mock-warning">
+            <strong>🔄 Mock Mode Active:</strong> This version uses mock vectorization to bypass OpenAI quota issues. 
+            All functionality works but uses basic text matching instead of sophisticated AI analysis.
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
     # Sidebar
     with st.sidebar:
-        st.markdown("## 🎛️ Control Panel")
+        st.markdown("## 🎛️ Control Panel (Mock Mode)")
 
         # Connection
         if not st.session_state.connected:
             if st.button(
-                "🔌 Connect to Weaviate", type="primary", use_container_width=True
+                "🔌 Connect to Weaviate (Mock)", type="primary", use_container_width=True
             ):
                 if connect_to_weaviate():
                     st.success("✅ Connected!")
@@ -650,14 +647,13 @@ def main():
         if st.session_state.connected:
             upload_papers_section()
             display_collection_stats()
-            settings_section()
 
         # Footer
         st.markdown("---")
         st.markdown(
             """
         <small>
-        Built with Weaviate, OpenAI, and Streamlit<br/>
+        Built with Weaviate and Mock Vectorization<br/>
         <a href="https://docs.weaviate.io" target="_blank">📖 Weaviate Docs</a>
         </small>
         """,
@@ -669,15 +665,15 @@ def main():
         st.info("👆 Please connect to Weaviate using the sidebar to get started!")
 
         # Show quick start guide
-        st.markdown("### 🚀 Quick Start Guide")
+        st.markdown("### 🚀 Quick Start Guide (Mock Mode)")
         col1, col2, col3 = st.columns(3)
 
         with col1:
             st.markdown(
                 """
             **1. Connect** 🔌
-            - Click "Connect to Weaviate"
-            - Ensure API keys are set
+            - Click "Connect to Weaviate (Mock)"
+            - Uses mock vectors (no OpenAI needed)
             """
             )
 
@@ -695,8 +691,8 @@ def main():
             st.markdown(
                 """
             **3. Analyze** 🔍
-            - Find research gaps
-            - Chat with papers
+            - Basic gap analysis
+            - Simple chat with papers
             - Export results
             """
             )
@@ -704,7 +700,7 @@ def main():
         return
 
     # Main tabs
-    tab1, tab2 = st.tabs(["🔍 Gap Analysis", "💬 Chat with Papers"])
+    tab1, tab2 = st.tabs(["🔍 Gap Analysis (Mock)", "💬 Chat with Papers (Mock)"])
 
     with tab1:
         gap_analysis_tab()

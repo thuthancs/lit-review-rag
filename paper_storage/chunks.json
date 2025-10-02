@@ -1,0 +1,13 @@
+{
+  "a1889ef0-1ada-4507-b819-d549a47887ca_chunk_0": {
+    "paper_id": "a1889ef0-1ada-4507-b819-d549a47887ca",
+    "chunk_index": 0,
+    "content": "This is a test chunk for testing the simple storage system.",
+    "title": "Test Paper",
+    "authors": [
+      "Test Author"
+    ],
+    "doi": "test-doi",
+    "uploaded_at": "2025-10-01T20:17:21.526435"
+  }
+}

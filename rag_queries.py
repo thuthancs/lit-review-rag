@@ -3,7 +3,7 @@ RAG query functions for Literature Review system.
 Handles paper insertion, gap analysis, and chat functionality.
 """
 
-import openai
+from openai import OpenAI
 from typing import List, Dict, Any, Optional
 import logging
 import uuid
@@ -16,8 +16,8 @@ from weaviate_setup import get_weaviate_collection
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Initialize OpenAI client
-openai.api_key = config.OPENAI_API_KEY
+# Initialize OpenAI client with new API format
+openai_client = OpenAI(api_key=config.OPENAI_API_KEY)
 
 class RAGQueryManager:
     """Manages RAG operations for literature review."""
@@ -29,12 +29,13 @@ class RAGQueryManager:
     def _get_collection(self):
         """Get the Weaviate collection, connecting if necessary."""
         if not self.collection:
-            from weaviate_setup import setup_weaviate, get_weaviate_collection
-            if not setup_weaviate():
+            from weaviate_setup import weaviate_manager
+            if not weaviate_manager.connect():
                 raise ValueError("Failed to setup Weaviate connection")
-            self.collection = get_weaviate_collection()
-            if not self.collection:
+            self.collection = weaviate_manager.get_collection()
+            if self.collection is None:
                 raise ValueError("Weaviate collection not available. Please run setup first.")
+            logger.info(f"Collection retrieved successfully: {type(self.collection)}")
         return self.collection
     
     def insert_papers(self, papers_data: List[Dict[str, Any]]) -> bool:
@@ -66,9 +67,22 @@ class RAGQueryManager:
                         "paper_id": paper_id
                     }
                     
-                    # Insert into Weaviate
-                    self._get_collection().data.insert(chunk_data)
-                    total_chunks += 1
+                    # Insert into Weaviate with error handling
+                    try:
+                        self._get_collection().data.insert(chunk_data)
+                        total_chunks += 1
+                        logger.info(f"Inserted chunk {chunk_idx + 1} for paper: {paper.get('title', 'Unknown')}")
+                    except Exception as insert_error:
+                        error_msg = str(insert_error)
+                        logger.error(f"Failed to insert chunk {chunk_idx + 1}: {error_msg}")
+                        
+                        # Handle OpenAI quota issues specifically
+                        if "429" in error_msg or "quota" in error_msg.lower():
+                            logger.error("OpenAI API quota exceeded during paper insertion. Cannot vectorize content.")
+                            raise ValueError("OpenAI API quota exceeded. Cannot upload papers without vectorization.")
+                        else:
+                            # For other errors, continue with next chunk
+                            logger.warning(f"Skipping chunk {chunk_idx + 1} due to error")
             
             logger.info(f"Successfully inserted {len(papers_data)} papers with {total_chunks} total chunks")
             return True
@@ -92,7 +106,7 @@ class RAGQueryManager:
             top_k = config.TOP_K_RESULTS
             
         try:
-            # Perform semantic search
+            # Perform semantic search with error handling for OpenAI quota issues
             response = self._get_collection().query.near_text(
                 query=query,
                 limit=top_k,
@@ -116,7 +130,14 @@ class RAGQueryManager:
             return results
             
         except Exception as e:
-            logger.error(f"Error searching chunks: {str(e)}")
+            error_msg = str(e)
+            logger.error(f"Error searching chunks: {error_msg}")
+            
+            # Handle specific OpenAI quota exceeded error
+            if "429" in error_msg or "quota" in error_msg.lower():
+                logger.error("OpenAI API quota exceeded. Please check your OpenAI billing and usage limits.")
+                return []
+            
             return []
     
     def generate_gap_analysis(self, topic: str) -> Dict[str, Any]:
@@ -161,7 +182,7 @@ Please provide:
 Format your response as a structured analysis.
 """
             
-            response = openai.ChatCompletion.create(
+            response = openai_client.chat.completions.create(
                 model=config.OPENAI_MODEL,
                 messages=[
                     {"role": "system", "content": "You are a research analyst expert in identifying research gaps and opportunities."},
@@ -245,7 +266,7 @@ Please provide a comprehensive answer with specific citations when possible.
             messages.append({"role": "user", "content": prompt})
             
             # Generate response
-            response = openai.ChatCompletion.create(
+            response = openai_client.chat.completions.create(
                 model=config.OPENAI_MODEL,
                 messages=messages,
                 max_tokens=config.MAX_TOKENS,
