@@ -5,17 +5,15 @@ Run with: streamlit run app.py
 
 import streamlit as st
 from weaviate_setup import (
-    get_client,
-    import_chunks,
-    get_collection_stats,
-    create_collection,
+    weaviate_manager,
+    setup_weaviate,
+    get_weaviate_collection,
 )
 from pdf_processor import PDFProcessor
 from rag_queries import (
-    find_research_gaps,
+    get_rag_manager,
+    generate_gap_analysis,
     chat_with_papers,
-    get_papers_summary,
-    search_specific_topic,
 )
 import tempfile
 import os
@@ -128,21 +126,16 @@ def connect_to_weaviate():
     try:
         if not st.session_state.connected:
             with st.spinner("Connecting to Weaviate..."):
-                client = get_client()
-                st.session_state.client = client
-                st.session_state.connected = True
-                st.session_state.connection_error = None
-
-                # Initialize collection if needed
-                if not st.session_state.collection_initialized:
-                    try:
-                        create_collection(client)
-                        st.session_state.collection_initialized = True
-                    except Exception as e:
-                        # Collection might already exist
-                        st.session_state.collection_initialized = True
-
-                return True
+                if setup_weaviate():
+                    st.session_state.client = weaviate_manager.client
+                    st.session_state.connected = True
+                    st.session_state.connection_error = None
+                    st.session_state.collection_initialized = True
+                    return True
+                else:
+                    st.session_state.connection_error = "Failed to setup Weaviate"
+                    st.session_state.connected = False
+                    return False
     except Exception as e:
         st.session_state.connection_error = str(e)
         st.session_state.connected = False
@@ -240,7 +233,16 @@ def process_uploaded_papers(uploaded_files, manual_title, manual_authors, manual
             chunks = processor.process_paper(tmp_path, metadata)
 
             # Import to Weaviate
-            import_chunks(st.session_state.client, chunks)
+            rag_manager = get_rag_manager()
+            paper_data = [{
+                'title': metadata.title if metadata else uploaded_file.name.replace('.pdf', ''),
+                'authors': [metadata.authors] if metadata else ['Unknown'],
+                'abstract': metadata.abstract if metadata else '',
+                'publication_year': metadata.year if metadata else 2024,
+                'doi': '',
+                'chunks': [chunk['chunk'] for chunk in chunks]
+            }]
+            rag_manager.insert_papers(paper_data)
 
             # Track success
             total_chunks += len(chunks)
@@ -288,8 +290,19 @@ def display_collection_stats():
         return
 
     try:
-        stats = get_collection_stats(st.session_state.client)
-        papers = get_papers_summary(st.session_state.client)
+        # Get collection stats (simplified for now)
+        collection = get_weaviate_collection()
+        if collection:
+            # Get total count
+            result = collection.aggregate.over_all(total_count=True)
+            total_chunks = result.total_count if result.total_count else 0
+            stats = {"total_chunks": total_chunks}
+            
+            # For now, just show basic stats
+            papers = []  # TODO: Implement paper summary
+        else:
+            stats = {"total_chunks": 0}
+            papers = []
 
         st.sidebar.markdown("---")
         st.sidebar.markdown("### 📊 Collection Stats")
@@ -361,8 +374,14 @@ def gap_analysis_tab():
 
     # Check if papers exist
     try:
-        stats = get_collection_stats(st.session_state.client)
-        if stats["total_chunks"] == 0:
+        collection = get_weaviate_collection()
+        if collection:
+            result = collection.aggregate.over_all(total_count=True)
+            total_chunks = result.total_count if result.total_count else 0
+        else:
+            total_chunks = 0
+        
+        if total_chunks == 0:
             st.info(
                 "📚 Please upload some research papers first to perform gap analysis."
             )
@@ -395,11 +414,12 @@ def gap_analysis_tab():
     if st.button("🔍 Analyze Research Gaps", type="primary", use_container_width=True):
         with st.spinner("🤔 Analyzing papers for research gaps..."):
             try:
-                gaps = find_research_gaps(
-                    st.session_state.client,
-                    focus_area if focus_area else None,
-                    limit=num_chunks,
-                )
+                result = generate_gap_analysis(focus_area if focus_area else "research")
+                if result["success"]:
+                    gaps = result["analysis"]
+                else:
+                    st.error(f"❌ Error during analysis: {result.get('error', 'Unknown error')}")
+                    return
 
                 st.session_state.last_gap_analysis = {
                     "gaps": gaps,
@@ -456,8 +476,14 @@ def chat_tab():
 
     # Check if papers exist
     try:
-        stats = get_collection_stats(st.session_state.client)
-        if stats["total_chunks"] == 0:
+        collection = get_weaviate_collection()
+        if collection:
+            result = collection.aggregate.over_all(total_count=True)
+            total_chunks = result.total_count if result.total_count else 0
+        else:
+            total_chunks = 0
+        
+        if total_chunks == 0:
             st.info("📚 Please upload some research papers first to start chatting.")
             return
     except:
@@ -535,9 +561,14 @@ def chat_tab():
         # Get answer
         with st.spinner("🔍 Searching papers and generating answer..."):
             try:
-                answer = chat_with_papers(
-                    st.session_state.client, question, limit=num_sources
-                )
+                result = chat_with_papers(question)
+                if result["success"]:
+                    answer = result["answer"]
+                else:
+                    st.error(f"❌ Error getting answer: {result.get('error', 'Unknown error')}")
+                    # Remove user message if failed
+                    st.session_state.chat_history.pop()
+                    return
 
                 # Add assistant message to history
                 st.session_state.chat_history.append(
