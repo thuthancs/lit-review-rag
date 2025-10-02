@@ -19,7 +19,7 @@ class Config:
     OPENAI_API_KEY: str = os.getenv('OPENAI_API_KEY', '')
     
     # Collection Configuration
-    COLLECTION_NAME: str = 'research_papers'
+    COLLECTION_NAME: str = 'Research_papers'
     
     # Text Processing Configuration
     CHUNK_SIZE: int = 250  # words per chunk

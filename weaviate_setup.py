@@ -19,7 +19,7 @@ class WeaviateManager:
     
     def __init__(self):
         """Initialize Weaviate client."""
-        self.client: Optional[weaviate.Client] = None
+        self.client: Optional[weaviate.WeaviateClient] = None
         self.collection_name = config.COLLECTION_NAME
         
     def connect(self) -> bool:
@@ -32,10 +32,9 @@ class WeaviateManager:
         try:
             weaviate_config = config.get_weaviate_config()
             
-            self.client = weaviate.Client(
-                url=weaviate_config['url'],
-                auth_client_secret=weaviate_config['auth_client_secret'],
-                timeout_config=weaviate_config['timeout_config']
+            self.client = weaviate.connect_to_weaviate_cloud(
+                cluster_url=weaviate_config['url'],
+                auth_credentials=weaviate.AuthApiKey(weaviate_config['auth_client_secret'])
             )
             
             # Test connection
@@ -63,7 +62,7 @@ class WeaviateManager:
             
         try:
             collections = self.client.collections.list_all()
-            collection_names = [col.name for col in collections]
+            collection_names = [col if isinstance(col, str) else col.name for col in collections]
             return self.collection_name in collection_names
         except Exception as e:
             logger.error(f"Error checking collection existence: {str(e)}")
@@ -81,62 +80,24 @@ class WeaviateManager:
             return False
             
         try:
-            # Define collection schema
-            collection_schema = {
-                "class": self.collection_name,
-                "description": "Collection for research papers with text chunks for RAG",
-                "vectorizer": "text2vec-openai",
-                "vectorizerConfig": {
-                    "model": "ada",
-                    "modelVersion": "002",
-                    "type": "text"
-                },
-                "properties": [
-                    {
-                        "name": "title",
-                        "dataType": ["text"],
-                        "description": "Title of the research paper"
-                    },
-                    {
-                        "name": "authors",
-                        "dataType": ["text[]"],
-                        "description": "List of authors"
-                    },
-                    {
-                        "name": "abstract",
-                        "dataType": ["text"],
-                        "description": "Abstract of the paper"
-                    },
-                    {
-                        "name": "content_chunk",
-                        "dataType": ["text"],
-                        "description": "Text chunk from the paper content"
-                    },
-                    {
-                        "name": "publication_year",
-                        "dataType": ["int"],
-                        "description": "Year of publication"
-                    },
-                    {
-                        "name": "doi",
-                        "dataType": ["text"],
-                        "description": "Digital Object Identifier"
-                    },
-                    {
-                        "name": "chunk_index",
-                        "dataType": ["int"],
-                        "description": "Index of this chunk within the paper"
-                    },
-                    {
-                        "name": "paper_id",
-                        "dataType": ["text"],
-                        "description": "Unique identifier for the paper"
-                    }
+            # Create collection with v4 API
+            self.client.collections.create(
+                name=self.collection_name,
+                description="Collection for research papers with text chunks for RAG",
+                vectorizer_config=Configure.Vectorizer.text2vec_openai(
+                    model="ada"
+                ),
+                properties=[
+                    Property(name="title", data_type=DataType.TEXT, description="Title of the research paper"),
+                    Property(name="authors", data_type=DataType.TEXT_ARRAY, description="List of authors"),
+                    Property(name="abstract", data_type=DataType.TEXT, description="Abstract of the paper"),
+                    Property(name="content_chunk", data_type=DataType.TEXT, description="Text chunk from the paper content"),
+                    Property(name="publication_year", data_type=DataType.INT, description="Year of publication"),
+                    Property(name="doi", data_type=DataType.TEXT, description="Digital Object Identifier"),
+                    Property(name="chunk_index", data_type=DataType.INT, description="Index of this chunk within the paper"),
+                    Property(name="paper_id", data_type=DataType.TEXT, description="Unique identifier for the paper")
                 ]
-            }
-            
-            # Create collection
-            self.client.schema.create_class(collection_schema)
+            )
             logger.info(f"Successfully created collection: {self.collection_name}")
             return True
             
@@ -220,8 +181,8 @@ if __name__ == "__main__":
             print("✅ Collection access successful!")
         else:
             print("❌ Collection access failed!")
+        
+        # Clean up
+        weaviate_manager.close()
     else:
         print("❌ Weaviate setup failed!")
-    
-    # Clean up
-    weaviate_manager.close()

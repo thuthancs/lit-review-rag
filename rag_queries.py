@@ -24,9 +24,18 @@ class RAGQueryManager:
     
     def __init__(self):
         """Initialize RAG query manager."""
-        self.collection = get_weaviate_collection()
+        self.collection = None
+    
+    def _get_collection(self):
+        """Get the Weaviate collection, connecting if necessary."""
         if not self.collection:
-            raise ValueError("Weaviate collection not available. Please run setup first.")
+            from weaviate_setup import setup_weaviate, get_weaviate_collection
+            if not setup_weaviate():
+                raise ValueError("Failed to setup Weaviate connection")
+            self.collection = get_weaviate_collection()
+            if not self.collection:
+                raise ValueError("Weaviate collection not available. Please run setup first.")
+        return self.collection
     
     def insert_papers(self, papers_data: List[Dict[str, Any]]) -> bool:
         """
@@ -58,7 +67,7 @@ class RAGQueryManager:
                     }
                     
                     # Insert into Weaviate
-                    self.collection.data.insert(chunk_data)
+                    self._get_collection().data.insert(chunk_data)
                     total_chunks += 1
             
             logger.info(f"Successfully inserted {len(papers_data)} papers with {total_chunks} total chunks")
@@ -84,7 +93,7 @@ class RAGQueryManager:
             
         try:
             # Perform semantic search
-            response = self.collection.query.near_text(
+            response = self._get_collection().query.near_text(
                 query=query,
                 limit=top_k,
                 return_metadata=["distance", "certainty"]
@@ -330,39 +339,48 @@ Content: {content}
         
         return opportunities[:5]  # Return top 5 opportunities
 
-# Global instance
-rag_manager = RAGQueryManager()
+# Global instance - will be created when first accessed
+rag_manager = None
+
+def get_rag_manager():
+    """Get the global RAG manager instance, creating it if necessary."""
+    global rag_manager
+    if rag_manager is None:
+        rag_manager = RAGQueryManager()
+    return rag_manager
 
 def insert_papers(papers_data: List[Dict[str, Any]]) -> bool:
     """Convenience function to insert papers."""
-    return rag_manager.insert_papers(papers_data)
+    return get_rag_manager().insert_papers(papers_data)
 
 def generate_gap_analysis(topic: str) -> Dict[str, Any]:
     """Convenience function to generate gap analysis."""
-    return rag_manager.generate_gap_analysis(topic)
+    return get_rag_manager().generate_gap_analysis(topic)
 
 def chat_with_papers(question: str, conversation_history: List[Dict] = None) -> Dict[str, Any]:
     """Convenience function to chat with papers."""
-    return rag_manager.chat_with_papers(question, conversation_history)
+    return get_rag_manager().chat_with_papers(question, conversation_history)
 
 if __name__ == "__main__":
     # Test the RAG functions
     print("Testing RAG functions...")
     
+    manager = get_rag_manager()
+    
     # Test search
     test_query = "machine learning applications"
-    results = rag_manager.search_relevant_chunks(test_query, top_k=3)
+    results = manager.search_relevant_chunks(test_query, top_k=3)
     print(f"✅ Search test: Found {len(results)} results")
     
     # Test gap analysis
-    gap_result = rag_manager.generate_gap_analysis("artificial intelligence")
+    gap_result = manager.generate_gap_analysis("artificial intelligence")
     if gap_result["success"]:
         print("✅ Gap analysis test: Success")
     else:
         print(f"❌ Gap analysis test: {gap_result.get('error', 'Unknown error')}")
     
     # Test chat
-    chat_result = rag_manager.chat_with_papers("What are the main challenges in AI?")
+    chat_result = manager.chat_with_papers("What are the main challenges in AI?")
     if chat_result["success"]:
         print("✅ Chat test: Success")
     else:
