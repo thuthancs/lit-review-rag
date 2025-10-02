@@ -1,0 +1,7 @@
+streamlit
+weaviate-client
+openai
+python-dotenv
+PyPDF2
+pdfplumber
+numpy
